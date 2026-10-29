@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2013, 2016-2018, 2020-2021, The Linux Foundation. All rights reserved.
- * Copyright (c) 2022-2023, Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2022-2024, Qualcomm Innovation Center, Inc. All rights reserved.
  */
 
 #include <linux/kernel.h>
@@ -289,17 +289,11 @@ static void disable_unprepare_rcg_srcs(struct clk *curr, struct clk *new)
 static unsigned long
 calc_rate(unsigned long rate, u32 m, u32 n, u32 mode, u32 hid_div)
 {
-	if (hid_div) {
-		rate *= 2;
-		rate /= hid_div + 1;
-	}
+	if (hid_div)
+		rate = mult_frac(rate, 2, hid_div + 1);
 
-	if (mode) {
-		u64 tmp = rate;
-		tmp *= m;
-		do_div(tmp, n);
-		rate = tmp;
-	}
+	if (mode)
+		rate = mult_frac(rate, m, n);
 
 	return rate;
 }
@@ -2006,6 +2000,7 @@ static long clk_rcg2_crmc_list_rate(struct clk_hw *hw, unsigned int n,
 static struct clk_regmap_ops clk_rcg2_crmc_regmap_ops = {
 	.set_crm_rate = clk_rcg2_crmc_hw_set_rate,
 	.list_rate = clk_rcg2_crmc_list_rate,
+	.list_registers = clk_rcg2_list_registers,
 };
 
 static int clk_rcg2_crmc_init(struct clk_hw *hw)
@@ -2092,7 +2087,7 @@ int clk_rcg2_crmb_prepare(struct clk_hw *hw)
 	struct clk_rcg2 *rcg = to_clk_rcg2(hw);
 	struct clk_crm *crm = rcg->clkr.crm;
 
-	if (!rcg->freq_tbl && !crm->initialized)
+	if (!rcg->freq_tbl || !crm->initialized)
 		return 0;
 
 	return clk_rcg2_vote_bw(hw, rcg->current_freq);
@@ -2179,6 +2174,7 @@ unsigned long clk_rcg2_crmb_hw_set_bw(struct clk_hw *hw,
 static struct clk_regmap_ops clk_rcg2_crmb_regmap_ops = {
 	.set_crm_rate = clk_rcg2_crmb_hw_set_bw,
 	.list_rate = clk_rcg2_list_rate,
+	.list_registers = clk_rcg2_list_registers,
 };
 
 static int clk_rcg2_crmb_init(struct clk_hw *hw)

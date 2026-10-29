@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2019-2021, The Linux Foundation. All rights reserved.
- * Copyright (c) 2022-2023 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2022-2024 Qualcomm Innovation Center, Inc. All rights reserved.
  */
 
 #include <linux/acpi.h>
@@ -552,6 +552,7 @@ static int qcom_adreno_smmu_init_context(struct arm_smmu_domain *smmu_domain,
 
 static const struct of_device_id qcom_smmu_client_of_match[] __maybe_unused = {
 	{ .compatible = "qcom,adreno" },
+	{ .compatible = "qcom,adreno-gmu" },
 	{ .compatible = "qcom,mdp4" },
 	{ .compatible = "qcom,mdss" },
 	{ .compatible = "qcom,sc7180-mdss" },
@@ -575,11 +576,25 @@ static int qcom_smmu_init_context(struct arm_smmu_domain *smmu_domain,
 
 static int qcom_smmu_cfg_probe(struct arm_smmu_device *smmu)
 {
-	unsigned int last_s2cr = ARM_SMMU_GR0_S2CR(smmu->num_mapping_groups - 1);
 	struct qcom_smmu *qsmmu = to_qcom_smmu(smmu);
+	unsigned int last_s2cr;
 	u32 reg;
 	u32 smr;
 	int i;
+
+	/*
+	 * Some platforms support more than the Arm SMMU architected maximum of
+	 * 128 stream matching groups. For unknown reasons, the additional
+	 * groups don't exhibit the same behavior as the architected registers,
+	 * so limit the groups to 128 until the behavior is fixed for the other
+	 * groups.
+	 */
+	if (smmu->num_mapping_groups > 128) {
+		dev_notice(smmu->dev, "\tLimiting the stream matching groups to 128\n");
+		smmu->num_mapping_groups = 128;
+	}
+
+	last_s2cr = ARM_SMMU_GR0_S2CR(smmu->num_mapping_groups - 1);
 
 	/*
 	 * With some firmware versions writes to S2CR of type FAULT are
@@ -1340,10 +1355,12 @@ static struct qsmmuv500_tbu_device *qsmmuv500_find_tbu(struct arm_smmu_device *s
 	struct qsmmuv500_tbu_device *tbu = NULL;
 	struct qsmmuv500_archdata *data = to_qsmmuv500_archdata(smmu);
 
-	list_for_each_entry(tbu, &data->tbus, list) {
-		if (tbu->sid_start <= sid &&
-		    sid < tbu->sid_start + tbu->num_sids)
-			return tbu;
+	if (!list_empty(&data->tbus)) {
+		list_for_each_entry(tbu, &data->tbus, list) {
+			if (tbu->sid_start <= sid &&
+			sid < tbu->sid_start + tbu->num_sids)
+				return tbu;
+		}
 	}
 
 	return NULL;
@@ -1863,15 +1880,18 @@ static void qsmmuv500_log_outstanding_transactions(struct work_struct *work)
 		goto unlock;
 	}
 
-	list_for_each_entry(tbu, &data->tbus, list) {
-		if (arm_smmu_power_on(tbu->pwr)) {
-			dev_err_ratelimited(tbu->dev, "%s: Failed to power on TBU.\n", __func__);
-			continue;
+	if (!list_empty(&data->tbus)) {
+		list_for_each_entry(tbu, &data->tbus, list) {
+			if (arm_smmu_power_on(tbu->pwr)) {
+				dev_err_ratelimited(tbu->dev,
+				"%s: Failed to power on TBU.\n", __func__);
+				continue;
+			}
+
+			tbu->impl->log_outstanding_transactions(tbu);
+
+			arm_smmu_power_off(smmu, tbu->pwr);
 		}
-
-		tbu->impl->log_outstanding_transactions(tbu);
-
-		arm_smmu_power_off(smmu, tbu->pwr);
 	}
 
 	arm_smmu_power_off(smmu, smmu->pwr);

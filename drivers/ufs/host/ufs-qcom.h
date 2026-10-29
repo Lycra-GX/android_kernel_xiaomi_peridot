@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 /* Copyright (c) 2013-2021, The Linux Foundation. All rights reserved.
- * Copyright (c) 2022-2023 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2022-2024 Qualcomm Innovation Center, Inc. All rights reserved.
  */
 
 #ifndef UFS_QCOM_H_
@@ -45,6 +45,15 @@ enum ufs_qcom_ber_mode {
 	UFS_QCOM_BER_MODE_G1_G4,
 	UFS_QCOM_BER_MODE_G5,
 	UFS_QCOM_BER_MODE_MAX,
+};
+
+/* CPU Clusters Info */
+enum cpu_cluster_info {
+	CLUSTER_0,
+	CLUSTER_1,
+	CLUSTER_2,
+	CLUSTER_3,
+	MAX_NUM_CLUSTERS,
 };
 
 #define UFS_QCOM_LIMIT_NUM_LANES_RX	2
@@ -279,10 +288,10 @@ static inline void ufs_qcom_assert_reset(struct ufs_hba *hba)
 		    REG_UFS_CFG1);
 
 	/*
-	 * Make sure assertion of ufs phy reset is written to
-	 * register before returning
+	 * Dummy read to ensure the write takes effect before doing any sort
+	 * of delay
 	 */
-	mb();
+	ufshcd_readl(hba, REG_UFS_CFG1);
 }
 
 static inline void ufs_qcom_deassert_reset(struct ufs_hba *hba)
@@ -291,10 +300,10 @@ static inline void ufs_qcom_deassert_reset(struct ufs_hba *hba)
 		    REG_UFS_CFG1);
 
 	/*
-	 * Make sure de-assertion of ufs phy reset is written to
-	 * register before returning
+	 * Dummy read to ensure the write takes effect before doing any sort
+	 * of delay
 	 */
-	mb();
+	ufshcd_readl(hba, REG_UFS_CFG1);
 }
 
 struct ufs_qcom_bus_vote {
@@ -575,14 +584,18 @@ struct ufs_qcom_host {
 	struct qcom_bus_scale_data *qbsd;
 
 	bool vdd_hba_pc;
+	bool ufs_gen_type;
 	struct notifier_block vdd_hba_reg_nb;
 
 	struct ufs_vreg *vddp_ref_clk;
-	struct ufs_vreg *vccq_parent;
+	struct ufs_vreg *parent_vreg;
 	struct ufs_vreg *vccq_shutdown;
 	bool work_pending;
 	bool bypass_g4_cfgready;
 	bool is_dt_pm_level_read;
+	u32 spm_lvl_prev;
+	bool set_ds_spm_level;
+	u32 ufs_pm_mode;
 	bool is_phy_pwr_on;
 	/* Protect the usage of is_phy_pwr_on against racing */
 	struct mutex phy_mutex;
@@ -613,7 +626,7 @@ struct ufs_qcom_host {
 	atomic_t therm_mitigation;
 	cpumask_t perf_mask;
 	cpumask_t def_mask;
-	cpumask_t esi_affinity_mask;
+	cpumask_t cluster_mask[MAX_NUM_CLUSTERS];
 	bool disable_wb_support;
 	struct ufs_qcom_ber_hist ber_hist[UFS_QCOM_BER_MODE_MAX];
 	struct list_head regs_list_head;
